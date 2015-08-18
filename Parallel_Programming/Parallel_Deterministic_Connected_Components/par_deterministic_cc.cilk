@@ -1,0 +1,291 @@
+#include <iostream>
+
+#include <stdlib.h>
+#include <cstdlib>
+
+#include <time.h>
+#include <string>
+#include <sys/time.h>   
+
+#include <algorithm> 
+#include <vector>
+#include <utility>
+#include <fstream>
+#include <map>
+
+
+class Edge{
+public:
+    int u;
+    int v;
+};
+
+//Print time elapsed in seconds
+void print_time_elapsed(std::string desc, struct timeval* start, struct timeval* end) {
+    
+    struct timeval elapsed;
+    
+    if(start->tv_usec > end->tv_usec) {
+        end->tv_usec += 1000000;
+        end->tv_sec--;
+    }
+    elapsed.tv_usec = end->tv_usec - start->tv_usec;
+    elapsed.tv_sec  = end->tv_sec  - start->tv_sec;
+    float time_elapsed = (elapsed.tv_sec*1000000 + elapsed.tv_usec)/1000000.f;
+    std::cout << desc << " Total Time Elapsed = " << time_elapsed << " seconds" << std::endl;
+}
+
+//Serial Prefix Sum
+int serial_prefix_sum(int* S, int n){
+
+    for(int i=1; i<n; i++){
+        S[i] += S[i-1];
+    }
+    return S[n-1];
+}
+
+void serial_prefix_sum(int* X, int* S, int n){
+
+    int count = 0;
+    S[0] = X[0];
+    for(int i = 1; i<n; i++){
+        S[i] = S[i-1] + X[i];
+        if(X[i] == 1){
+            count++;
+        }
+    }
+}
+
+void prefix_sum(int* X, int* S, int n){
+
+    int i;
+    if(n==1){
+        S[0]=X[0];
+        return;
+    }
+    else{
+        
+        int* Y = new int[n/2];
+        int* Z = new int[n/2];
+        
+        cilk_for(int j=0; j<n/2; j++){
+            //i = j + 1;
+            Y[(j+1) - 1]=X[(2*(j+1)-1)-1] + X[(2*(j+1)) - 1];
+        }
+
+        prefix_sum(Y,Z,n/2);
+        delete[] Y;
+        delete[] Z;
+        
+        cilk_for(int j=0; j<n; j++){
+            //i = j + 1;
+            if((j+1)==1){
+                S[(j+1)-1]=X[(j+1)-1];
+            }
+            else if(i%2==0){
+                S[(j+1)-1]=Z[((j+1)/2) - 1];
+            }else{
+                S[(j+1)-1]=Z[(((j+1)-1)/2) - 1] + X[(j+1) - 1];
+            }
+        }        
+    }
+    return;
+}
+
+void par_find_roots(int n, int* P, int* S){
+
+    cilk_for(int i=0; i<n; i++){
+        S[i]=P[i];
+    }
+
+    bool flag = true;
+    while(flag==true){
+        flag = false;
+        cilk_for(int i=0; i<n; i++){
+            S[i]=S[S[i]-1];
+            if(S[i]!=S[S[i]-1]){
+                flag = true;
+            }       
+        }
+    }
+
+    return;
+}
+
+void deterministic_cc(int n, int m, Edge* E, int* L){
+
+    if(m==0){
+        return;
+    }
+
+    int* l2h = new int[n]; 
+    int* h2l = new int[n];
+    cilk_for(int i=0; i<n; i++){l2h[i] = h2l[i] = 0;} 
+
+    int* S = new int[m];
+    cilk_for(int i=0; i<m; i++){S[i]=0;}
+        
+    cilk_for(int i=0; i<m; i++){
+        if(E[i].u < E[i].v){
+        	l2h[E[i].u-1]=1;
+        }
+        else{
+        	h2l[E[i].u-1]=1;
+        }
+    }
+    
+    int* l2h_sum = new int[n]; 
+    int* h2l_sum = new int[n];
+    cilk_for(int i=0; i<n; i++){l2h_sum[i] = h2l_sum[i] = 0;} 
+    int n1=0, n2=0;
+    serial_prefix_sum(l2h, l2h_sum, n);       
+    serial_prefix_sum(h2l, h2l_sum, n);       
+    n1 = l2h_sum[n-1];
+    n2 = h2l_sum[n-1];
+
+    cilk_for(int i=0; i<m; i++){
+        if(n1>=n2 && E[i].u < E[i].v) {
+        	L[E[i].u-1]=E[i].v;
+        }
+        else if (n1<n2 && E[i].u>E[i].v){
+        	L[E[i].u-1]=E[i].v;
+        }
+    }
+
+    par_find_roots(n,L,L);
+
+	cilk_for(int i=0; i<m; i++){
+        S[i] = ((L[E[i].u-1] != L[E[i].v-1]) ? 1:0);
+    }
+    
+    int* S_sum = new int[m];
+    for (int i=0; i<m; i++) {S_sum[i] = 0;}
+    serial_prefix_sum(S,S_sum, m);
+
+    int edges_left = S_sum[m-1];
+    Edge* F = new Edge[edges_left];
+
+    cilk_for(int i=0; i<m; i++){
+        if(L[E[i].u-1] != L[E[i].v-1]){
+            F[S_sum[i]-1].u = L[E[i].u-1];
+            F[S_sum[i]-1].v = L[E[i].v-1];
+        }
+    }
+
+    delete[] l2h;
+    delete[] h2l;
+    delete[] l2h_sum;
+    delete[] h2l_sum;
+    delete[] S;
+    delete[] S_sum;
+    delete[] E;
+
+    deterministic_cc(n,edges_left,F,L);
+
+    return;
+}
+
+int cilk_main() {
+	
+    std::vector<std::string> filenames;
+    //  filenames.push_back("com-youtube-in");
+    filenames.push_back("ca-AstroPh-in");
+    //filenames.push_back("roadNet-PA-in");
+    /*
+    filenames.push_back("as-skitter-in");
+    filenames.push_back("com-amazon-in");
+    filenames.push_back("com-friendster-in");
+    filenames.push_back("roadNet-CA-in");
+    filenames.push_back("com-orkut-in");
+    filenames.push_back("roadNet-TX-in");
+    
+    filenames.push_back("com-dblp-in");
+    filenames.push_back("com-lj-in");
+    
+    */
+
+    for(int k=0; k<filenames.size(); k++){
+
+        std::string filename = std::string("samples/") + filenames[k] + std::string(".txt");
+
+        std::ifstream inputFile;
+        inputFile.open(filename.c_str());
+
+        if( !inputFile || inputFile.eof() ){ 
+        	std::cerr << "Error: File Not Found.\n"; exit(2); 
+     	}
+     	
+     	//Number of vertices and edges
+     	int vertex_count, edge_count = 0;
+     	inputFile >> vertex_count >> edge_count;
+    	
+    	//Edges
+        Edge* edges = new Edge[edge_count];
+     	for(int i=0; i<edge_count; i++){
+     		inputFile >> edges[i].u >> edges[i].v;
+     	}
+     	
+     	inputFile.close();
+     	
+     	//Vertex label
+    	int* vertex_label = new int[vertex_count];
+     	for(int i=0; i<vertex_count; i++){
+     		vertex_label[i]=i+1;
+    	}
+
+    	//Calculating time elapsed
+        struct timeval start, end;
+        struct timezone tzp;
+        
+        gettimeofday(&start, &tzp);
+        deterministic_cc(vertex_count, edge_count, edges, vertex_label);
+        gettimeofday(&end, &tzp);
+
+
+        int* flag = new int[vertex_count];
+        for(int i=0; i<vertex_count; i++){
+            flag[i]=0;
+        }
+        int cc_count=0;
+        // Calculate the number of connected components.
+        for(int i=0; i<vertex_count; i++){
+            if(flag[vertex_label[i]-1] == 0){
+                flag[vertex_label[i]-1] = 1;
+            }
+            else{
+                cc_count += flag[i];
+            }
+        }
+        std::cout << filenames[k] << "\t" << cc_count<<std::endl;
+
+        std::vector<int> cc_size(vertex_count,0);
+        for(int i=0; i<vertex_count; i++){
+            cc_size[vertex_label[i]]++;
+        }
+
+        std::sort(cc_size.begin(), cc_size.end());
+        std::reverse(cc_size.begin(), cc_size.end());
+
+        std::string output_file = std::string("samples/") + filenames[k] + std::string("-det-CC-out.txt");
+        std::ofstream outfile;
+        outfile.open(output_file.c_str());
+
+        outfile << cc_count << std::endl; //number of connected components 
+        //size of each of the r connected components, each on a separate line, ordered from the largest to the smallest
+        for(std::vector<int>::iterator iter=cc_size.begin(); iter!=cc_size.end(); iter++){
+            if(*iter>0){
+                outfile << *iter << std::endl;
+            }
+        }
+
+        outfile.close();
+
+        print_time_elapsed("Parallel Deterministic Select: ", &start, &end);
+
+        delete[] vertex_label;
+        delete[] edges;
+        delete[] flag;
+    }
+    return 0;
+
+}

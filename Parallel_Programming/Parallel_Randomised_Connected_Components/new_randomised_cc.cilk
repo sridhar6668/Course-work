@@ -1,0 +1,270 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <cstdlib>
+
+#include <time.h>
+#include <string>
+#include <sys/time.h>   
+
+#include <algorithm> 
+#include <vector>
+#include <utility>
+#include <fstream>
+#include <map>
+
+using namespace std;
+struct edge{
+	int u;
+	int v;
+};
+
+void prefix_sum(int* X, int* S, int n){
+
+	int i;
+    if(n==1){
+        S[0]=X[0];
+        return;
+    }
+    else{
+        
+        int* Y = new int[n/2];
+        int* Z = new int[n/2];
+        
+        cilk_for(int j=0; j<n/2; j++){
+			i = j + 1;
+            Y[i - 1]=X[(2*i-1)-1] + X[(2*i) - 1];
+        }
+
+		prefix_sum(Y,Z,n/2);
+		
+        cilk_for(int j=0; j<n; j++){
+			i = j + 1;
+            if(i==1){
+                S[i-1]=X[i-1];
+            }
+            else if(i%2==0){
+                S[i-1]=Z[(i/2) - 1];
+            }else{
+                S[i-1]=Z[((i-1)/2) - 1] + X[i - 1];
+            }
+        }
+        
+        delete[] Y;
+        delete[] Z;
+    }
+    //print_prefix_sum(X, S, n);
+    return;
+}
+
+
+void prefix_sum_serial(int S[], int edges){
+	int i;
+	for(i = 1; i < edges; i++){
+		S[i] += S[i - 1];
+	}
+}
+
+void print_label(int *L, int vertices){
+	int i;
+	for(i = 0; i < vertices; i++){
+		printf("Label %d = %d \n", i+1, L[i]);
+	}
+}
+
+int * Par_Randomised_CC(int vertices, int edges, struct edge * E,int *L, int step){
+	//cout<<"**************************************************************************************************";
+	//std::cout<<"Step: "<<step<<endl;
+	
+	int n = vertices, head = 1, tail = 0;
+	int next_iter_edges = 0;
+	if(edges == 0){
+		return L;
+	}
+	int *C =(int *)malloc(sizeof(int) * n); 
+	int * S  =(int *)malloc(sizeof(int) * edges);
+	int * S1  =(int *)malloc(sizeof(int) * edges);
+	int * M;
+	// Array starts from 0. So we use 'ext' to adjust the difference
+	int ext = 1; 
+	//cout<<"After declaration"<<endl;
+	// Randomly assign head or tail to each vertex.
+	cilk_for(int i = 0; i < n; i++){
+		C[i] = rand() % 2;   	// Assign head or tail.
+	}
+	
+	// If v is head and u is tail . then L[u] = L[v].
+	cilk_for(int i = 0; i < edges; i++){
+		if(C[E[i].u - ext] == tail && C[E[i].v - ext] == head){   // u is E[2*i] - ext]  and v is C[E[2*i + 1] - ext]
+			L[E[i].u - ext] = L[E[i].v - ext];
+		}
+	}
+	
+	// Preliminary step for prefix sum.
+	cilk_for(int i = 0; i < edges; i++){
+		if(L[E[i].u - ext] != L[E[i].v - ext]){
+			S[i] = 1;
+			S1[i] = 1;
+		}
+		else{
+			S[i] = 0;
+			S1[i] = 0;
+		}
+	}
+	
+	//cout<<"Before prefix sum"<<endl;
+	prefix_sum_serial(S, edges);
+	//cout<<"after prefix sum"<<endl;
+	//cout<<"Prefix sum:"<<S[edges - 1 ]<<endl;
+	int new_edges = S[edges -1];
+	// Updated edge pair
+	struct edge * F  =(struct edge *)malloc(sizeof(struct edge) * S[edges - 1 ]);
+	
+    cilk_for(int i = 0; i < edges; i++){
+		if(L[E[i].u - ext] != L[E[i].v - ext]){
+			F[S[i] - ext].u = L[E[i].u - ext];
+			F[S[i] - ext].v = L[E[i].v - ext];
+		}
+	}
+	//cout<<"Before free"<<endl;
+	free(C);
+	free(S);
+	free(S1);
+	//cout<<"after free"<<endl;
+
+    M = Par_Randomised_CC( vertices, new_edges, F, L, step + 1);
+
+	// Relabel again.
+	cilk_for(int i = 0; i < edges; i++){
+		if(E[i].v == L[E[i].u - ext]){
+			L[E[i].u - ext] = L[E[i].v -ext];
+		}
+
+	} 
+
+	free(E);
+	return M;
+}
+
+//Print time elapsed in seconds
+void print_time_elapsed(std::string desc, struct timeval* start, struct timeval* end) {
+    
+    /*
+    struct timeval {
+        time_t      tv_sec;
+        suseconds_t tv_usec;    
+    }*/
+    struct timeval elapsed;
+    
+    if(start->tv_usec > end->tv_usec) {
+        end->tv_usec += 1000000;
+        end->tv_sec--;
+    }
+    elapsed.tv_usec = end->tv_usec - start->tv_usec;
+    elapsed.tv_sec  = end->tv_sec  - start->tv_sec;
+    float time_elapsed = (elapsed.tv_sec*1000000 + elapsed.tv_usec)/1000000.f;
+    std::cout << desc << " Total Time Elapsed = " << time_elapsed << std::endl;
+}
+
+int cilk_main(int argc, char** argv) {
+	
+    std::vector<std::string> filenames;
+    //filenames.push_back("com-youtube-in");
+
+    
+    //filenames.push_back("as-skitter-in");
+    //filenames.push_back("com-amazon-in");
+    //filenames.push_back("com-friendster-in");
+    //filenames.push_back("roadNet-CA-in");
+    //filenames.push_back("com-orkut-in");
+    //filenames.push_back("roadNet-TX-in");
+    filenames.push_back("ca-AstroPh-in");
+    //filenames.push_back("com-dblp-in");
+    //filenames.push_back("com-lj-in");
+    //filenames.push_back("roadNet-PA-in");
+
+    for(int k=0; k<filenames.size(); k++){
+    	std::string filename = std::string("input/") + filenames[k] + std::string(".txt");
+        //std::string filename = std::string("/work/01905/rezaul/CSE613/HW2/turn-in/") + filenames[k] + std::string(".txt");
+
+        std::ifstream inputFile;
+        inputFile.open(filename.c_str());
+
+        if( !inputFile || inputFile.eof() ){ 
+        	std::cerr << "Error: File Not Found.\n"; exit(2); 
+     	}
+     	
+     	//Number of vertices and edges
+     	int vertex_count, edge_count = 0;
+     	inputFile >> vertex_count >> edge_count;
+    	
+    	//Edges
+        edge* edges = new edge[edge_count];
+     	for(int i=0; i<edge_count; i++){
+     		inputFile >> edges[i].u >> edges[i].v;
+     	}
+     	
+     	inputFile.close();
+     	
+     	//Vertex label
+    	int* vertex_label = new int[vertex_count];
+     	for(int i=0; i<vertex_count; i++){
+     		vertex_label[i]=i+1;
+    	}
+
+    	//Calculating time elapsed
+        struct timeval start, end;
+        struct timezone tzp;
+    	//std::cout<<"before calling function"<<std::endl;    
+        gettimeofday(&start, &tzp);
+        Par_Randomised_CC(vertex_count, edge_count, edges, vertex_label, 1);
+        gettimeofday(&end, &tzp);
+
+
+        int* flag = new int[vertex_count];
+        for(int i=0; i<vertex_count; i++){
+            flag[i]=0;
+        }
+        int cc_count=0;
+        // Calculate the number of connected components.
+        for(int i=0; i<vertex_count; i++){
+            if(flag[vertex_label[i]-1] == 0){
+                flag[vertex_label[i]-1] = 1;
+            }
+            else{
+                cc_count += flag[i];
+            }
+        }
+        std::cout<<cc_count<<std::endl;
+
+        std::vector<int> cc_size(vertex_count,0);
+        for(int i=0; i<vertex_count; i++){
+            cc_size[vertex_label[i]]++;
+        }
+
+        std::sort(cc_size.begin(), cc_size.end());
+        std::reverse(cc_size.begin(), cc_size.end());
+
+        std::string output_file = std::string("output/") + filenames[k] + std::string("-rand-CC-out.txt");
+        std::ofstream outfile;
+        outfile.open(output_file.c_str());
+
+        outfile << cc_count << std::endl; //number of connected components 
+        //size of each of the r connected components, each on a separate line, ordered from the largest to the smallest
+        for(std::vector<int>::iterator iter=cc_size.begin(); iter!=cc_size.end(); iter++){
+            if(*iter>0){
+                outfile << *iter << std::endl;
+            }
+        }
+
+        outfile.close();
+        std::cout << filenames[k] << std::endl;
+        print_time_elapsed("Parallel Deterministic Select: ", &start, &end);
+
+        delete[] vertex_label;
+        delete[] edges;
+        delete[] flag;
+    }
+    return 0;
+
+}
